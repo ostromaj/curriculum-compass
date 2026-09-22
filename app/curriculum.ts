@@ -1,5 +1,7 @@
+import {objectives,type Objective} from './objectives';
+export type {Objective} from './objectives';
 export type Level='SL'|'HL';
-export type Item={id:string;title:string;hours:number;hl:boolean};
+export type Item={id:string;title:string;hours:number;hl:boolean;objectives:Objective[]};
 export type Section={id:string;title:string;items:Item[]};
 export const sourceUrl='https://ibdocs.re/p/IB%20SUBJECT%20GUIDES/Group%204%20-%20Sciences/Computer%20Science/Computer%20Science%20Guide%202027%20-%20English.pdf#page=31';
 // Topic totals: IB guide, printed p25. Labels and level scope: printed p26.
@@ -17,8 +19,14 @@ const groups:[string,string,[string,number,number][]][]=[
  ['IA','Internal assessment',[['The computational solution',35,35]]],
  ['CP','Collaborative sciences project',[['Collaborative sciences project',10,10]]]
 ];
-export function curriculum(level:Level):Section[]{return groups.map(([id,title,rows])=>({id,title,items:rows.flatMap(([name,sl,hl],i)=>{const hours=level==='SL'?sl:hl;return hours?[{id:`${id}.${i+1}`,title:name,hours,hl:sl===0}]:[]})})).filter(s=>s.items.length)}
+export function curriculum(level:Level):Section[]{return groups.map(([id,title,rows])=>({id,title,items:rows.flatMap(([name,sl,hl],i)=>{const hours=level==='SL'?sl:hl;return hours?[{id:`${id}.${i+1}`,title:name,hours,hl:sl===0,objectives:(objectives[`${id}.${i+1}`]??[]).filter(o=>level==='HL'||!o.hl)}]:[]})})).filter(s=>s.items.length)}
 export type ProgressRecord={done:boolean;planned:number;taught:number};
 export type ClassRecord={id:string;name:string;level:Level;minutes:number;progress:Record<string,ProgressRecord>};
-export function getProgress(c:ClassRecord,item:Item):ProgressRecord{return c.progress[item.id]??{done:false,planned:item.hours,taught:0}}
-export function metrics(c:ClassRecord){const items=curriculum(c.level).flatMap(s=>s.items);const rows=items.map(i=>getProgress(c,i));const planned=rows.reduce((a,r)=>a+r.planned,0);return{count:items.length,done:rows.filter(r=>r.done).length,planned,taught:rows.reduce((a,r)=>a+r.taught,0),weighted:planned?rows.reduce((a,r)=>a+(r.done?r.planned:0),0)/planned*100:0,remaining:rows.reduce((a,r)=>a+Math.max(0,r.planned-r.taught),0)}}
+export function getObjectives(item:Item):Objective[]{return item.objectives}
+export function objectiveKey(item:Item,objective:Objective){return `detail:${item.id}:${objective.code}`}
+export function objectiveDone(c:ClassRecord,item:Item,objective:Objective):boolean{return c.progress[objectiveKey(item,objective)]?.done??c.progress[item.id]?.done??false}
+export function itemCompletion(c:ClassRecord,item:Item){const list=getObjectives(item);return list.length?{count:list.length,done:list.filter(o=>objectiveDone(c,item,o)).length}:{count:1,done:c.progress[item.id]?.done?1:0}}
+export function getProgress(c:ClassRecord,item:Item):ProgressRecord{const row=c.progress[item.id]??{done:false,planned:item.hours,taught:0};const completion=itemCompletion(c,item);return {...row,done:completion.done===completion.count}}
+export function setItemDone(c:ClassRecord,item:Item,done:boolean):ClassRecord{const progress={...c.progress,[item.id]:{...getProgress(c,item),done}};for(const o of getObjectives(item)){const key=objectiveKey(item,o);progress[key]={...(progress[key]??{planned:0,taught:0}),done}}return {...c,progress}}
+export function setObjectiveDone(c:ClassRecord,item:Item,target:Objective,done:boolean):ClassRecord{const progress={...c.progress};for(const o of getObjectives(item)){const key=objectiveKey(item,o);progress[key]={...(progress[key]??{planned:0,taught:0}),done:o.code===target.code?done:objectiveDone(c,item,o)}}const all=getObjectives(item).every(o=>progress[objectiveKey(item,o)].done);progress[item.id]={...getProgress(c,item),done:all};return {...c,progress}}
+export function metrics(c:ClassRecord){const items=curriculum(c.level).flatMap(s=>s.items);const rows=items.map(i=>getProgress(c,i));const parts=items.map(i=>itemCompletion(c,i));const planned=rows.reduce((a,r)=>a+r.planned,0);return{count:parts.reduce((a,r)=>a+r.count,0),done:parts.reduce((a,r)=>a+r.done,0),planned,taught:rows.reduce((a,r)=>a+r.taught,0),weighted:planned?rows.reduce((a,r,i)=>a+r.planned*parts[i].done/parts[i].count,0)/planned*100:0,remaining:rows.reduce((a,r)=>a+Math.max(0,r.planned-r.taught),0)}}
